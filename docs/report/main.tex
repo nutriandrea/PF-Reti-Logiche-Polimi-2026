@@ -1,0 +1,727 @@
+%=======================================================================
+%  Progetto di Reti Logiche - AA 2025/2026
+%  Relazione del modulo project_reti_logiche
+%  Gestione di una lista ordinata di task in memoria esterna
+%=======================================================================
+\documentclass[a4paper,12pt]{article}
+
+% --- Pacchetti lingua e codifica ---
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath}
+\usepackage[italian]{babel}
+
+% --- Margini e geometria ---
+\usepackage{geometry}
+\geometry{
+    margin=2.5cm,
+    headheight=14pt,
+    includehead,
+    includefoot
+}
+
+% --- Tipografia ---
+\usepackage{microtype}
+
+% --- Grafica ---
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usetikzlibrary{automata, positioning, arrows.meta, shapes.geometric, fit, calc, decorations.pathreplacing}
+
+% --- Tabelle e figure ---
+\usepackage{booktabs}
+\usepackage{float}
+\usepackage{caption}
+\usepackage{subcaption}
+
+% --- Collegamenti ipertestuali ---
+\usepackage{hyperref}
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    urlcolor=blue,
+    citecolor=blue
+}
+
+% --- Intestazioni e piè di pagina ---
+\usepackage{fancyhdr}
+\usepackage{lastpage}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small Progetto di Reti Logiche --- AA 2025/2026}
+\fancyhead[R]{\small Pagina \thepage{}/\pageref{LastPage}}
+\fancyfoot[C]{\small \texttt{project\_reti\_logiche} --- Cacioppo, Carbone}
+\renewcommand{\headrulewidth}{0.4pt}
+\renewcommand{\footrulewidth}{0.4pt}
+
+% --- Stile prima pagina (senza header/footer fancy) ---
+\fancypagestyle{plain}{%
+    \fancyhf{}
+    \renewcommand{\headrulewidth}{0pt}
+    \renewcommand{\footrulewidth}{0pt}
+}
+
+% --- Paragrafi ---
+\usepackage{parskip}
+
+% --- Colori per il diagramma FSM ---
+\definecolor{stateInit}{HTML}{E8F5E9}
+\definecolor{stateIdle}{HTML}{FFF3E0}
+\definecolor{stateOp00}{HTML}{E3F2FD}
+\definecolor{stateOp01}{HTML}{FCE4EC}
+\definecolor{stateOp10}{HTML}{F3E5F5}
+\definecolor{stateOp11}{HTML}{FFFDE7}
+\definecolor{stateDone}{HTML}{EFEBE9}
+\definecolor{stateRead}{HTML}{E0F2F1}
+\definecolor{stateWrite}{HTML}{FBE9E7}
+
+\begin{document}
+
+% --- Pagina del titolo ---
+\begin{titlepage}
+\centering
+\vspace*{1cm}
+
+\includegraphics[width=0.35\textwidth]{assets/logo_polimi.png}\\[1cm]
+
+{\large Scuola di Ingegneria Industriale e dell'Informazione}\\[0.5cm]
+{\large Corso di Reti Logiche --- Prova Finale}\\[2cm]
+
+{\huge\bfseries Progetto di Reti Logiche}\\[0.4cm]
+{\Large Modulo \texttt{project\_reti\_logiche}}\\[0.4cm]
+{\Large Gestione di una lista ordinata di task}\\[0.2cm]
+{\Large in memoria esterna}\\[1.5cm]
+
+\vfill
+
+\begin{tabular}{rl}
+\textbf{Studente:} & Andrea Cacioppo \\
+\textbf{Matricola:} & 10902819 \\[0.3cm]
+\textbf{Studente:} & Andrea Carbone \\
+\textbf{Matricola:} & 10907106 \\
+\end{tabular}
+\\[1cm]
+
+{\large Anno Accademico 2025/2026}
+
+\vspace*{1cm}
+\end{titlepage}
+
+% --- Indice ---
+\tableofcontents
+\newpage
+
+%=======================================================================
+\section{Introduzione}
+%=======================================================================
+
+In questo progetto abbiamo sviluppato un modulo VHDL che si occupa di gestire una lista ordinata di task, con la lista che sta in una memoria esterna. Più precisamente, la memoria è una Single-Port Block RAM configurata in modalità Write-First. Le cose che il modulo deve saper fare sono quattro: alzare la priorità di tutti i task presenti, togliere il primo elemento della lista, inserire un task nuovo rispettando l'ordine di priorità, e cancellare tutto.
+
+Il progetto si basa sulle specifiche del documento \emph{PFRL\_Specifiche\_2526\_V2.pdf} del corso di Reti Logiche (Prof.~Fornaciari, A.A.~2025/2026).
+
+Per capire meglio come funziona, facciamo un esempio. Prendiamo una lista con due task: $[\texttt{Task}_1(P=0),\ \texttt{Task}_2(P=2)]$, $\texttt{count}=2$. Se vogliamo inserire (OP~10) un nuovo $\texttt{Task}_3(P=1)$, il nostro modulo parte dall'indirizzo 1 e scorre la memoria finché non incontra un task con priorità maggiore di 1 (che in questo caso è $\texttt{Task}_2$). A questo punto sposta $\texttt{Task}_2$ di una posizione verso destra (si vede bene in Figura~\ref{fig:mem_struct}) e mette $\texttt{Task}_3$ all'indirizzo 2. Il risultato è $[\texttt{Task}_1(P=0),\ \texttt{Task}_3(P=1),\ \texttt{Task}_2(P=2)]$, e il contatore sale a 3. Se invece usiamo l'incremento priorità (OP~00), ogni task sale di 1 (ma non oltre 3), e otteniamo $[\texttt{Task}_1(P=1),\ \texttt{Task}_2(P=3)]$.
+
+La Figura~\ref{fig:mem_struct} mostra come sono organizzati i dati in memoria, mentre la Figura~\ref{fig:blocchi} dà una vista d'insieme dell'architettura.
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+    box/.style={draw, minimum width=7cm, minimum height=0.6cm, font=\footnotesize},
+    brace/.style={thick}
+]
+    \node[box, fill=gray!10] (addr0) {Indirizzo 0: \texttt{count} (6 bit)};
+    \node[box, below=0pt of addr0] (addr1) {Indirizzo 1: \texttt{ID\_TASK} (6 bit) $\mid$ \texttt{PRIORITY} (2 bit)};
+    \node[box, below=0pt of addr1] (addr2) {Indirizzo 2: \texttt{ID\_TASK} (6 bit) $\mid$ \texttt{PRIORITY} (2 bit)};
+    \node[box, below=0pt of addr2] (dots) {$\cdots$};
+    \node[box, below=0pt of dots] (addrn) {Indirizzo $N$: \texttt{ID\_TASK} (6 bit) $\mid$ \texttt{PRIORITY} (2 bit)};
+    \draw[brace, decorate, decoration={brace, mirror}] ([xshift=-0.3cm]addrn.south west) -- ([xshift=-0.3cm]addr0.north west)
+        node[midway, left, font=\footnotesize] {Block RAM};
+\end{tikzpicture}
+\caption{La memoria: indirizzo 0 = contatore task, indirizzi 1..$N$ = singoli task (6 bit ID, 2 bit priorità).}
+\label{fig:mem_struct}
+\end{figure}
+
+Abbiamo sintetizzato il tutto con Xilinx Vivado, e passa tutte le simulazioni: pre-sintesi, post-sintesi funzionale e post-sintesi timing (con back-annotation SDF).
+
+\newpage
+\subsection{Struttura della memoria}
+
+La memoria è organizzata in modo semplice:
+
+\begin{itemize}
+    \item \textbf{Indirizzo 0}: qui si trova il numero di task presenti (count), su 6 bit (quindi da 0 a 63).
+    \item \textbf{Indirizzi 1..N}: ogni posizione contiene un task, che occupa un byte. I 6 bit più significativi sono l'\texttt{ID\_TASK}, i 2 bit meno significativi sono la \texttt{PRIORITY}.
+\end{itemize}
+
+Per esempio, il byte \texttt{0b00000101} vuol dire ID = 1, priorità = 1. Invece \texttt{0b00001100} è ID = 3, priorità = 0.
+
+La priorità va da 0 (massima) a 3 (minima). I task hanno tutti ID diversi, quindi al massimo ci possono stare 63 elementi. ID = 0 vuol dire lista vuota o errore.
+
+\subsection{Operazioni disponibili}
+
+Con \texttt{i\_op} a 2 bit possiamo scegliere tra quattro operazioni:
+
+\begin{description}
+    \item[OP = 00 (Incrementa priorità)] Prende tutti i task in lista e gli alza la priorità di 1, senza superare 3. L'ordine tra i task non cambia: se due finiscono con la stessa priorità, quello che stava prima rimane prima.
+    \item[OP = 01 (Rimuovi)] Toglie il primo task (quello all'indirizzo 1). Gli altri si spostano a sinistra per coprire il buco, il contatore scende di 1, e in uscita si vede l'ID di quello rimosso. Se la lista è vuota, il modulo restituisce ID = 0.
+    \item[OP = 10 (Inserisci)] Aggiunge un nuovo task, mettendolo in coda a quelli con la stessa priorità (funziona come una FIFO). Se la lista è vuota, finisce direttamente in prima posizione.
+    \item[OP = 11 (Clear)] Resetta tutto, contatore a zero.
+\end{description}
+
+\newpage
+\subsection{Protocollo START-DONE}
+
+Per sincronizzarci con la logica esterna usiamo un semplice handshake START-DONE:
+
+\begin{enumerate}
+    \item L'esterno alza \texttt{i\_start} a 1 per far partire l'operazione.
+    \item \texttt{i\_start} resta a 1 finché il modulo non risponde alzando \texttt{o\_done} a 1.
+    \item Quando vede \texttt{o\_done = 1}, l'esterno può abbassare \texttt{i\_start} a 0.
+    \item Il modulo vede lo 0 su \texttt{i\_start} e riporta \texttt{o\_done} a 0, pronto per il prossimo giro.
+    \item Una nuova operazione può partire solo quando \texttt{o\_done} è tornato a 0.
+\end{enumerate}
+
+Con il reset asincrono (\texttt{i\_rst}), il modulo scrive 0 all'indirizzo 0 della memoria, tiene \texttt{o\_done} a 1 durante il setup, e quando ha finito lo riabbassa.
+
+\subsection{Un esempio pratico}
+
+Vediamo un caso concreto. Partiamo con 4 task in memoria:
+
+\[
+\begin{array}{c|c|c}
+\text{Indirizzo} & \text{Byte} & \text{Task} \\ \hline
+0 & 0\texttt{x}04 & \text{count = 4} \\
+1 & 0\texttt{x}40 & \text{ID = 16, P = 0} \\
+2 & 0\texttt{x}21 & \text{ID = 8, P = 1}  \\
+3 & 0\texttt{x}0E & \text{ID = 3, P = 2}  \\
+4 & 0\texttt{x}33 & \text{ID = 12, P = 3}
+\end{array}
+\]
+
+L'ordine è giusto: P = 0 all'indirizzo 1, poi P = 1, P = 2, e infine P = 3.
+
+\textbf{Inseriamo un nuovo task (OP = 10)}: abbiamo ID = 5, P = 1. Dobbiamo metterlo in coda a quelli con priorità 1, quindi dopo l'indirizzo 2 ma prima dell'indirizzo 3. \newpage Ecco cosa succede:
+
+\[
+\begin{array}{c|c|c}
+\text{Indirizzo} & \text{Byte} & \text{Task} \\ \hline
+0 & 0\texttt{x}05 & \text{count = 5} \\
+1 & 0\texttt{x}40 & \text{ID = 16, P = 0} \\
+2 & 0\texttt{x}21 & \text{ID = 8, P = 1}  \\
+3 & 0\texttt{x}15 & \text{ID = 5, P = 1}  \\
+4 & 0\texttt{x}0E & \text{ID = 3, P = 2}  \\
+5 & 0\texttt{x}33 & \text{ID = 12, P = 3}
+\end{array}
+\]
+
+I task con priorità maggiore di 1 sono slittati in avanti di una posizione, e il contatore è passato a 5.
+
+\newpage
+%=======================================================================
+\section{Architettura del modulo}
+%=======================================================================
+
+Il cuore del progetto è una macchina a stati finiti (FSM) con 26 stati, che gestisce tutto il flusso di lavoro. L'abbiamo implementata in un unico processo sincrono (fronte di salita del clock, reset asincrono), perché è il modo più semplice per tenere tutto sotto controllo ed evitare latch indesiderati.
+
+\subsection{Schema funzionale}
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+    node distance=1.5cm,
+    >=Stealth,
+    block/.style={
+        draw, rectangle, rounded corners, thick,
+        minimum width=3.5cm, minimum height=1.6cm,
+        align=center, font=\small
+    },
+    interface/.style={
+        draw, rectangle, rounded corners, thick,
+        fill=gray!10,
+        minimum width=3.5cm, minimum height=1.4cm,
+        align=center, font=\small
+    }
+]
+
+% Nodi principali
+\node[block, fill=stateOp00] (fsm)
+    {Control Unit\\FSM (26 stati)};
+
+\node[block, fill=stateRead, right=3cm of fsm] (mem)
+    {Memoria\\Block RAM\\Write-First};
+
+\node[block, fill=stateIdle, below=2.5cm of fsm] (regs)
+    {Registri e Datapath\\
+    count, idx, op, task\_id};
+
+\node[interface, left=3cm of fsm] (input)
+    {Ingressi\\
+    $i\_clk,\ i\_rst,\ i\_start$\\
+    $i\_task\_id,\ i\_op$\\
+    $i\_task\_priority$};
+
+\node[interface, above=2cm of mem] (output)
+    {Uscite\\
+    $o\_done,\ o\_task\_id$};
+
+% Connessioni
+\draw[->] (input) -- node[above] {Comandi} (fsm);
+
+\draw[->] (fsm) -- node[above] {\scriptsize addr, data, en, we} (mem);
+
+\draw[->] (mem) -- node[below] {\scriptsize $i\_mem\_data$} (fsm);
+
+\draw[->] (fsm.east) |- node[above, pos=0.63] {$o\_done$} (output.west);
+
+\draw[<->] (fsm) -- node[right] {Controllo e dati} (regs);
+
+% Contorno del sistema
+\node[
+    draw,
+    dashed,
+    rounded corners,
+    fit={(fsm) (regs)},
+    inner sep=0.7cm,
+    label={[font=\small]above:project\_reti\_logiche}
+] {};
+
+\end{tikzpicture}
+
+\caption{Diagramma a blocchi che illustra l'architettura interna del modulo.}
+\label{fig:blocchi}
+\end{figure}
+
+\subsection{Modulo 1: Control Unit}
+
+La Control Unit è una FSM a 26 stati che gestisce tutta la logica di controllo: riceve \texttt{i\_start}, campiona gli ingressi, legge il contatore dei task dalla memoria, e decide che sequenza di stati seguire per parlare con la RAM.
+\newpage
+\subsubsection{Perché un unico processo?}
+
+Mettere tutta la Control Unit in un solo processo VHDL ha tre vantaggi:
+
+\begin{itemize}
+    \item \textbf{Meno roba che può rompersi}: transizioni e uscite stanno insieme, niente segnali che girano tra processi diversi.
+    \item \textbf{Niente race conditions}: ogni scrittura in memoria capita sul fronte di clock, non ci sono sorprese.
+    \item \textbf{Codice più leggibile}: tutto quello che fa la FSM sta in un posto solo, si capisce subito cosa succede.
+\end{itemize}
+
+\subsubsection{Gli stati}
+
+I 26 stati della FSM sono organizzati in fasi logiche (Figura~\ref{fig:fsm}). Ecco come si muove il sistema:
+
+\begin{description}
+    \item[Inizializzazione --- \texttt{INIT} $\rightarrow$ \texttt{INIT\_WAIT} $\rightarrow$ \texttt{IDLE}.]
+          Al reset, \texttt{INIT} scrive 0 all'indirizzo 0. \texttt{INIT\_WAIT} è una specie di sala d'attesa: resta fermo finché \texttt{i\_start} è a 1, e quando scende a 0 passa allo stato di riposo \texttt{IDLE}.
+
+    \item[Idle --- \texttt{IDLE} $\rightarrow$ \texttt{READ\_COUNT}.]
+          In \texttt{IDLE} campioniamo gli ingressi (\texttt{i\_op}, \texttt{i\_task\_id}, \texttt{i\_task\_priority}) e aspettiamo \texttt{i\_start}=1. Quando arriva, si va a \texttt{READ\_COUNT}.
+
+    \item[Lettura e decisione --- \texttt{READ\_COUNT} $\rightarrow$ \texttt{WAIT\_COUNT} $\rightarrow$ \texttt{DECODE}.]
+          \texttt{READ\_COUNT} punta l'indirizzo 0 con enable alto; \texttt{WAIT\_COUNT} aspetta un ciclo per il dato valido; \texttt{DECODE} prende il conteggio letto e l'operazione e decide la strada.
+
+    \item[Smistamento --- \texttt{DECODE}.] 
+          Se il contatore è 0 e l'operazione non ha senso su una lista vuota (incremento o rimozione), salta direttamente a \texttt{DONE}. Altrimenti imbocca il ramo giusto.
+
+    \item[OP 00: Incrementa priorità (3 stati).]
+          \texttt{INC\_READ} $\rightarrow$ \texttt{WAIT\_INC} $\rightarrow$ \texttt{INC\_WRITE}. Un loop: per ogni task si legge il byte, si alza la priorità (max 3), si riscrive. Finito, si va a \texttt{DONE}.
+          
+    \item[OP 01: Rimozione (7 stati).]
+          \texttt{RM\_FIRST} prende l'ID del primo task e lo mette in uscita; \texttt{WAIT\_RM\_FIRST} e \texttt{RM\_FIRST\_RD} completano la lettura. Se c'era un solo elemento, si aggiorna il contatore. Altrimenti parte la catena \texttt{SHIFT\_READ} $\rightarrow$ \texttt{WAIT\_SHIFT} $\rightarrow$ \texttt{SHIFT\_WRITE} che sposta ogni task a sinistra per coprire il buco. Poi si decrementa il contatore e si va in \texttt{DONE}.
+
+    \item[OP 10: Inserimento (8 stati).]
+          \texttt{FIND} $\rightarrow$ \texttt{WAIT\_FIND} $\rightarrow$ \texttt{DECIDE} scorrono la lista per trovare il primo task con priorità peggiore di quella da inserire. Se serve, si fa lo shift a destra (\texttt{SHIFT\_READ} $\rightarrow$ \texttt{WAIT\_SHIFT} $\rightarrow$ \texttt{SHIFT\_WRITE}) per fare spazio. Poi \texttt{WRITE\_TASK} inserisce, \texttt{UPD\_COUNT} incrementa, fine.
+
+    \item[OP 11: Clear (1 stato).]
+          \texttt{CLEAR} scrive 0 all'indirizzo 0 e passa a \texttt{DONE}.
+
+    \item[Fine --- \texttt{DONE}.]
+          Alza \texttt{o\_done} a 1. Aspetta che l'esterno abbassi \texttt{i\_start} a 0, poi torna in \texttt{IDLE}.
+\end{description}
+
+\begin{figure}[H]
+\centering
+\resizebox{0.8\textwidth}{!}{% 
+\begin{tikzpicture}[
+    scale=0.85, transform shape,
+    state/.style={
+        draw, rounded corners=2pt,
+        minimum width=2.2cm, minimum height=0.9cm,
+        align=center, font=\footnotesize\bfseries, thick
+    },
+    edge/.style={
+        draw, thick, -{Stealth[scale=0.8]},
+        font=\scriptsize, rounded corners=4pt
+    },
+    group/.style={
+        draw, densely dotted, rounded corners=3pt,
+        inner sep=6pt,
+        font=\footnotesize\itshape
+    }
+]
+
+% ================= INIT =================
+\node[state, fill=stateInit] at (0, 2) (INIT) {INIT};
+\node[state, fill=stateInit] at (3.5, 2) (INIT_WAIT) {INIT\_WAIT};
+
+\draw[edge] (INIT) -- (INIT_WAIT);
+\path[edge] (INIT_WAIT) edge[loop above] node {start=1} ();
+% Percorso pulito e non sovrapposto verso IDLE
+\draw[edge] (INIT_WAIT.south) -- (3.5, 1) -- node[above] {start=0} (0, 1) -- (IDLE.north);
+
+% ================= IDLE-READ =================
+\node[state, fill=stateIdle] at (0, 0) (IDLE) {IDLE};
+\node[state, fill=stateRead] at (3.5, 0) (READ_COUNT) {READ\\COUNT};
+\node[state, fill=stateRead] at (7.0, 0) (WAIT_COUNT) {WAIT\\COUNT};
+\node[state, fill=stateRead] at (10.5, 0) (DECODE) {DECODE};
+\node[state, fill=stateDone] at (16.5, 0) (DONE) {DONE};
+
+\draw[edge] (IDLE.east) -- node[above] {start=1} (READ_COUNT.west);
+\draw[edge] (READ_COUNT.east) -- (WAIT_COUNT.west);
+\draw[edge] (WAIT_COUNT.east) -- (DECODE.west);
+
+% ================= BUS PRINCIPALE DA DECODE =================
+\draw[draw, thick, rounded corners=4pt] (DECODE.south) -- (10.5, -1.5) -- (1.5, -1.5) -- (1.5, -16.5);
+
+% ================= OP 00 =================
+\node[state, fill=stateOp00] at (3.5, -3) (INC_READ) {INC\\READ};
+\node[state, fill=stateOp00] at (7.0, -3) (WAIT_INC) {WAIT\\INC};
+\node[state, fill=stateOp00] at (10.5, -3) (INC_WRITE) {INC\\WRITE};
+
+\draw[edge] (1.5, -3) -- node[above] {op:00} (INC_READ.west);
+\draw[edge] (INC_READ.east) -- (WAIT_INC.west);
+\draw[edge] (WAIT_INC.east) -- (INC_WRITE.west);
+\draw[edge] (INC_WRITE.south) -- (10.5, -4.5) -- node[below] {idx<count} (3.5, -4.5) -- (INC_READ.south);
+\draw[edge] (INC_WRITE.east) -- node[above] {idx=count} (16.5, -3) -- (DONE.south);
+
+\node[group, fit={(INC_READ)(WAIT_INC)(INC_WRITE)}, label=above:\textbf{OP 00}] {};
+
+% ================= OP 01 =================
+\node[state, fill=stateOp01] at (3.5, -6) (RM1) {RM\\FIRST};
+\node[state, fill=stateOp01] at (7.0, -6) (RM2) {WAIT\\FIRST};
+\node[state, fill=stateOp01] at (10.5, -6) (RM3) {RM\\FIRST\_RD};
+\node[state, fill=stateOp01] at (14.0, -6) (UPD) {UPD\\COUNT};
+
+\node[state, fill=stateOp01] at (3.5, -8.5) (SHIFT_R) {SHIFT\\READ};
+\node[state, fill=stateOp01] at (7.0, -8.5) (WAIT_RS) {WAIT\\SHIFT};
+\node[state, fill=stateOp01] at (10.5, -8.5) (SHIFT_W) {SHIFT\\WRITE};
+
+\draw[edge] (1.5, -6) -- node[above] {op:01} (RM1.west);
+\draw[edge] (RM1.east) -- (RM2.west);
+\draw[edge] (RM2.east) -- (RM3.west);
+\draw[edge] (RM3.south) -- (10.5, -7.3) -- node[above] {count>1} (2.0, -7.3) |- (SHIFT_R.west);
+\draw[edge] (RM3.east) -- node[above] {count=1} (UPD.west);
+
+\draw[edge] (SHIFT_R.east) -- (WAIT_RS.west);
+\draw[edge] (WAIT_RS.east) -- (SHIFT_W.west);
+\draw[edge] (SHIFT_W.south) -- (10.5, -10.0) -- node[midway, below=4pt] {idx<count} (3.5, -10.0) -- (SHIFT_R.south);
+\draw[edge] (SHIFT_W.east) -- node[above] {idx=count} (14.0, -8.5) -- (UPD.south);
+
+\draw[edge] (UPD.east) -- node[above] {fine} (16.5, -6) -- (DONE.south);
+
+\node[group, fit={(RM1)(RM2)(RM3)(SHIFT_R)(WAIT_RS)(SHIFT_W)(UPD)}, label=above:\textbf{OP 01}] {};
+
+% ================= OP 10 =================
+\node[state, fill=stateOp10] at (3.5, -11.5) (FIND) {FIND};
+\node[state, fill=stateOp10] at (7.0, -11.5) (WAITF) {WAIT\\FIND};
+\node[state, fill=stateOp10] at (10.5, -11.5) (DEC) {DECIDE};
+\node[state, fill=stateOp10] at (14.0, -11.5) (WRITE_T) {WRITE\\TASK};
+
+\node[state, fill=stateOp10] at (3.5, -14) (SHIFT_I) {SHIFT\\READ};
+\node[state, fill=stateOp10] at (7.0, -14) (WAIT_IS) {WAIT\\SHIFT};
+\node[state, fill=stateOp10] at (10.5, -14) (SHIFT_IW) {SHIFT\\WRITE};
+\node[state, fill=stateOp10] at (14.0, -14) (UPD_I) {UPD\\COUNT};
+
+\draw[edge] (1.5, -11.5) -- node[above] {op:10} (FIND.west);
+\draw[edge] (FIND.east) -- (WAITF.west);
+\draw[edge] (WAITF.east) -- (DEC.west);
+\draw[edge] (DEC.north) -- (10.5, -10.2) -- node[midway, above=4pt] {prio<reg} (3.5, -10.2) -- (FIND.north);
+\draw[edge] (DEC.east) -- node[above] {fine} (WRITE_T.west);
+\draw[edge] (DEC.south) -- (10.5, -12.5) -- node[above] {shift} (2.0, -12.5) |- (SHIFT_I.west);
+
+\draw[edge] (SHIFT_I.east) -- (WAIT_IS.west);
+\draw[edge] (WAIT_IS.east) -- (SHIFT_IW.west);
+\draw[edge] (SHIFT_IW.south) -- (10.5, -15.5) -- node[below] {idx>pos} (3.5, -15.5) -- (SHIFT_I.south);
+\draw[edge] (SHIFT_IW.north) -- (10.5, -12.5) -- node[above] {idx=pos} (13.8, -12.5) -- ([xshift=-0.2cm]WRITE_T.south);
+\draw[edge] ([xshift=0.2cm]WRITE_T.south) -- ([xshift=0.2cm]UPD_I.north);
+\draw[edge] (UPD_I.east) -- node[above] {fine} (16.5, -14) -- (DONE.south);
+
+\node[group, fit={(FIND)(WAITF)(DEC)(SHIFT_I)(WAIT_IS)(SHIFT_IW)(WRITE_T)(UPD_I)}, label=above:\textbf{OP 10}] {};
+
+% ================= OP 11 =================
+\node[state, fill=stateOp11] at (3.5, -16.5) (CLEAR) {CLEAR};
+\draw[edge] (1.5, -16.5) -- node[above] {op:11} (CLEAR.west);
+\draw[edge] (CLEAR.east) -- node[above] {fine} (16.5, -16.5) -- (DONE.south);
+
+% ================= BACK TO IDLE =================
+\draw[edge] (DONE.north) -- (16.5, 3.5) -- node[above] {start=0} (-1.5, 3.5) -- (-1.5, 0) -- (IDLE.west);
+
+\end{tikzpicture}%
+}
+\caption{Diagramma degli stati della Control Unit.}
+\label{fig:fsm}
+\end{figure}
+
+\subsection{Modulo 2: Registri e datapath}
+
+I registri tengono lo stato interno del sistema: contatore dei task, indice di scorrimento, operazione in corso, ID e priorità. La logica di contorno si occupa di saturare le priorità, confrontare valori e calcolare gli shift.
+
+La Tabella~\ref{tab:registri} riassume i registri usati.
+
+\begin{table}[H]
+\centering
+\begin{tabular}{llp{7cm}}
+\toprule
+Registro & Dimensione & Scopo \\
+\midrule
+\texttt{reg\_count}       & 6 bit & Numero di task attualmente in lista \\
+\texttt{reg\_idx}         & 6 bit & Indice utile per scorrere o sfalsare la memoria \\
+\texttt{reg\_out\_id}     & 6 bit & ID del task appena rimosso (usato in OP 01) \\
+\texttt{reg\_insert\_pos} & 6 bit & Posizione calcolata per un nuovo inserimento (OP 10) \\
+\texttt{reg\_op}          & 2 bit & L'operazione richiesta (catturata in \newline IDLE) \\
+\texttt{reg\_task\_id}    & 6 bit & L'ID del task da inserire (OP 10) \\
+\texttt{reg\_task\_priority} & 2 bit & La priorità del task da inserire (OP 10) \\
+\bottomrule
+\end{tabular}
+\caption{Registri interni.}
+\label{tab:registri}
+\end{table}
+
+\subsection{Modulo 3: Memoria (Block RAM)}
+
+La memoria è una Single-Port Block RAM in modalità Write-First, fornita già pronta dai docenti. Noi abbiamo solo dovuto interfacciarci, rispettando il suo comportamento (descritto nella documentazione Xilinx Vivado):
+
+\begin{itemize}
+    \item \textbf{Scrittura}: con \texttt{o\_mem\_en} e \texttt{o\_mem\_we} alti, al clock il dato su \texttt{o\_mem\_data} viene scritto all'indirizzo \texttt{o\_mem\_addr}. Con la modalità Write-First, il dato è subito disponibile anche in uscita su \texttt{i\_mem\_data} dopo 2~ns.
+    \item \textbf{Lettura}: \texttt{o\_mem\_en}=1, \texttt{o\_mem\_we}=0. Si legge l'indirizzo e il dato arriva su \texttt{i\_mem\_data} dopo 2~ns.
+    \item \textbf{Riposo}: \texttt{o\_mem\_en}=0, la memoria non fa niente e \texttt{i\_mem\_data} tiene l'ultimo valore.
+\end{itemize}
+
+Il nostro modulo lavora in due cicli: nel primo imposta indirizzo e enable, nel secondo prende il dato valido.
+
+\subsection{Modulo 4: Ingressi}
+
+Il modulo prende in ingresso:
+
+\begin{itemize}
+    \item \texttt{i\_clk}: clock (periodo 20~ns).
+    \item \texttt{i\_rst}: reset asincrono, attivo alto, azzera registri e manda in \texttt{INIT}.
+    \item \texttt{i\_start}: avvia l'operazione (protocollo START-DONE).
+    \item \texttt{i\_op} (2 bit): seleziona l'operazione.
+    \item \texttt{i\_task\_id} (6 bit): ID del nuovo task (per OP~10).
+    \item \texttt{i\_task\_priority} (2 bit): priorità del nuovo task (per OP~10).
+\end{itemize}
+
+Per evitare che i segnali cambino mentre la FSM lavora, copiamo \texttt{i\_op}, \texttt{i\_task\_id} e \texttt{i\_task\_priority} nei registri interni appena entrati in \texttt{IDLE}.
+
+\subsection{Modulo 5: Uscite}
+
+Le uscite del modulo:
+
+\begin{itemize}
+    \item \texttt{o\_done}: vale 1 quando l'operazione è finita, torna a 0 quando l'esterno molla \texttt{i\_start}.
+    \item \texttt{o\_task\_id} (6 bit): ID del task rimosso (OP~01). Se lista vuota, vale 0.
+    \item \texttt{o\_mem\_addr} (16 bit): indirizzo RAM puntato.
+    \item \texttt{o\_mem\_data} (8 bit): dato da scrivere (quando \texttt{o\_mem\_we = 1}).
+    \item \texttt{o\_mem\_en}: enable della memoria.
+    \item \texttt{o\_mem\_we}: write enable.
+\end{itemize}
+
+All'inizio di ogni ciclo riportiamo i segnali di controllo memoria ai valori di default, per evitare latch o scritture accidentali.
+
+\subsection{Scelte progettuali}
+
+\subsubsection{Segnali di memoria}
+
+All'inizio di ogni ciclo, prima del \emph{case}, riportiamo \texttt{o\_mem\_en}, \texttt{o\_mem\_we}, \texttt{o\_mem\_addr} e \texttt{o\_mem\_data} ai valori predefiniti. In questo modo evitiamo latch e scritture non volute.
+
+\subsubsection{Shift dei task}
+
+Per la rimozione (OP 01) partiamo dal secondo task e spostiamo tutto a sinistra fino alla fine. Per l'inserimento (OP 10) facciamo il contrario: partiamo dall'ultimo e spostiamo tutto a destra fino al punto giusto. Così nessun dato viene sovrascritto prima di essere stato spostato.
+
+\subsubsection{Casi limite}
+
+\begin{itemize}
+    \item \textbf{Lista vuota}: se \texttt{reg\_count} = 0 e chiediamo OP 00 o OP 01, la FSM va direttamente in \texttt{DONE}. Per OP 01, \texttt{o\_task\_id} = 0.
+    \item \textbf{Priorità già al minimo}: con OP 00 la priorità si ferma a 3, senza sforare.
+    \item \textbf{Stessa priorità in inserimento}: il nuovo task va in coda a quelli con la stessa priorità (FIFO).
+    \item \textbf{Lista piena}: massimo 63 task (gli ID sono univoci). Al 64°, la FSM ignora OP~10 e va direttamente in \texttt{DONE}.
+\end{itemize}
+
+\newpage
+%=======================================================================
+\section{Risultati}
+%=======================================================================
+
+\subsection{Come abbiamo testato il sistema}
+
+Abbiamo simulato il modulo con \texttt{GHDL} su macOS ARM64 (VHDL-2008, flag \texttt{--std=08 -frelaxed}). Oltre al test base fornito dai docenti, abbiamo scritto un nostro test bench (\texttt{tb\_edge\_cases.vhd}) con 27 scenari divisi in tre gruppi.
+
+Il test bench confronta da solo le uscite della FSM con i risultati attesi. Se qualcosa non quadra, alza una \texttt{failure} e ferma la simulazione.
+
+\subsection{Test per gli Edge Cases}
+
+\subsubsection{Test Base}
+
+Qui abbiamo visto cosa succede con lista vuota o reset improvviso.
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{@{}llp{8cm}@{}}
+\toprule
+\textbf{Test} & \textbf{Op} & \textbf{Condizione analizzata e risultato ottenuto} \\
+\midrule
+1  & OP 00 & Lista vuota: il sistema ignora il comando e il conteggio resta 0. \\
+2  & OP 01 & Lista vuota: ci restituisce un ID\_TASK pari a 0. \\
+3  & OP 10 & Lista vuota: il task viene inserito all'indirizzo 1. \\
+4  & OP 11 & Lista vuota: il clear mantiene il contatore a 0. \\
+\addlinespace
+5  & OP 01 & Unico task presente: lo rimuove e azzera il contatore. \\
+6  & OP 00 & Unico task a priorità 0: lo porta correttamente a priorità 1. \\
+7  & OP 00 & Unico task a priorità 3: lo satura senza errori. \\
+8  & OP 01+10 & Singolo task: viene rimosso e sostituito, alla fine count è 1. \\
+\addlinespace
+24 & OP 00 + rst & Reset piazzato a metà di un incremento su 10 task: count azzerato. \\
+25 & OP 10 + rst & Reset mentre tenta di inserire un task su una lista di 5: count azzerato. \\
+\bottomrule
+\end{tabular}
+\caption{Test base: lista vuota e reset.}
+\label{tab:test_base}
+\end{table}
+
+\newpage
+\subsubsection{Test Funzionali}
+
+Qui abbiamo messo alla prova la logica di controllo: saturazioni multiple, priorità incrociate, shift su liste grandi.
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{@{}llp{8cm}@{}}
+\toprule
+\textbf{Test} & \textbf{Op} & \textbf{Condizione analizzata e risultato ottenuto} \\
+\midrule
+9  & OP 00 & Array con 4 task già a priorità 3: nessuno subisce modifiche. \\
+10 & OP 00 & Mix casuale P=0,1,2,3 $\rightarrow$ 1,2,3,3: saturano solo i valori giusti e l'ordine regge. \\
+11 & OP 00 & Sequenza di tre incrementi su (0,0,1): spinti progressivamente fino a 3. \\
+\addlinespace
+12 & OP 10 & Inseriamo P=0 in una lista popolata: finisce in testa facendo spostare tutti. \\
+13 & OP 10 & Inseriamo P=3 in una lista popolata: viene inserito in coda alla lista. \\
+14 & OP 10 & Priorità già esistente: va in coda al suo sottogruppo. \\
+15 & OP 10 & 4 insert con stessa priorità: mantiene intatto l'ordine cronologico d'arrivo. \\
+\addlinespace
+16 & OP 01 & Leviamo il capofila da una lista di 30: 29 elementi scalano a sinistra. \\
+17 & OP 10 & Nuovo innesto a metà di 25 task: mezza lista slitta a destra. \\
+18 & OP 10 & Inseriamo l'ID 63 in una lista al limite della capienza: viene allocato nell'ultimo indirizzo di memoria disponibile. \\
+19 & OP 10 & Inserimento di un task con P=1 in una lista di venti con P=0: allocazione corretta in coda al blocco. \\
+\bottomrule
+\end{tabular}
+\caption{Ordinamenti e shift.}
+\label{tab:test_funz}
+\end{table}
+
+\newpage
+\subsubsection{Test di Integrazione e Stress}
+
+Qui abbiamo concatenato operazioni in sequenze per vedere se il protocollo START-DONE reggeva.
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{@{}llp{8cm}@{}}
+\toprule
+\textbf{Test} & \textbf{Operazioni} & \textbf{Condizione analizzata e risultato ottenuto} \\
+\midrule
+20 & Ins, Inc, Rem, Ins, Inc, Clear & Sequenza di 10 operazioni miste: verifica dello stato della memoria dopo ogni singolo passo. \\
+21 & 5 ins + 2 rem + 1 ins + 2 inc & Scenario operativo complesso: l'ordinamento della lista viene mantenuto correttamente fino alla fine. \\
+22 & Ins + Rem + Ins + Inc + Rem & Alternanza di inserimenti e rimozioni: verifica puntuale dell'ID restituito a ogni estrazione. \\
+23 & 5$\times$(ins+rem) ciclico & Cicli continui di inserimento e rimozione: il modulo gestisce correttamente il passaggio ripetuto tra 1 e 0 elementi. \\
+\addlinespace
+26 & Qualunque OP & START inviato subito dopo il DONE: il modulo recepisce e avvia immediatamente la nuova operazione. \\
+27 & Qualunque OP & Segnale di START mantenuto alto per un tempo prolungato: l'operazione viene eseguita una sola volta, come da protocollo. \\
+\bottomrule
+\end{tabular}
+\caption{Test di integrazione.}
+\label{tab:test_integ}
+\end{table}
+
+\subsection{Esito della simulazione}
+
+Tutti i 27 test sono passati, per un totale di 78 operazioni.
+
+\begin{table}[H]
+\centering
+\begin{tabular}{lr}
+\toprule
+Parametro & Dettaglio \\
+\midrule
+Piattaforma & GHDL (macOS ARM64) \\
+Standard & VHDL 2008 (--std=08 -frelaxed) \\
+Scenari & 27 \\
+Aree coperte & 8 sottogruppi \\
+Operazioni & 78 \\
+Tempo simulato & 44.64 $\mu$s \\
+Clock & 20 ns \\
+Esito & 27/27 \\
+\bottomrule
+\end{tabular}
+\caption{Riepilogo test.}
+\label{tab:simulazione}
+\end{table}
+
+\newpage   
+Il terminale ha chiuso con:
+
+\begin{quote}
+\texttt{===== TUTTI I TEST EDGE CASE COMPLETATI CON SUCCESSO =====}
+\end{quote}
+
+\subsection{Validazione con la sintesi FPGA}
+
+Abbiamo sintetizzato il VHDL con Xilinx Vivado WebPACK 2018.3 su FPGA \texttt{Artix-7 xc7a200tfbg484-1} a 50\,MHz (20\,ns). Sintesi completata senza errori.
+
+I test della specifica sul sintetizzato hanno dato:
+\begin{itemize}
+    \item \textbf{Post-sintesi funzionale}: 9/9.
+    \item \textbf{Post-sintesi timing}: 9/9.
+\end{itemize}
+
+Ecco le risorse stimate:
+
+\begin{table}[H]
+\centering
+\begin{tabular}{ll}
+\toprule
+Dato tecnico & Riscontro \\
+\midrule
+Software di sintesi & Xilinx Vivado WebPACK 2018.3 \\
+Piattaforma target & Artix-7 xc7a200tfbg484-1 \\
+Timing di sistema & 20\,ns (50\,MHz) \\
+Slice LUTs impiegate & 93 su 8000 \\
+Slice Registers occupati & 83 su 16000 \\
+Bonded IOB & 54 su 150 \\
+BUFGCTRL & 1 su 32 \\
+WNS (Worst Negative Slack) & inf \\
+WHS (Worst Hold Slack) & inf \\
+TNS (Total Negative Slack) & 0.000\,ns \\
+Endpoint falliti & Nessuno (0 su 255) \\
+Stima consumi On-Chip & 3.934\,W \\
+\bottomrule
+\end{tabular}
+\caption{Sintesi su Vivado.}
+\label{tab:sintesi}
+\end{table}
+
+\newpage
+%=======================================================================
+\section{In conclusione}
+%=======================================================================
+
+Il modulo \texttt{project\_reti\_logiche} fa quello che deve: esegue le quattro operazioni, si sincronizza con l'esterno via START-DONE, e gestisce i casi limite (lista vuota, priorità satura, task con pari priorità).
+
+La FSM a 26 stati in un unico processo sincrono ha tenuto sotto controllo la complessità e reso deterministici gli accessi alla Block RAM.
+
+Per la validazione: 9 test della specifica più 27 test nostri (base, funzionali, integrazione). Tutti passati, dalla pre-sintesi alla post-sintesi timing. La sintesi su Vivado si è chiusa senza errori.
+
+\end{document}
